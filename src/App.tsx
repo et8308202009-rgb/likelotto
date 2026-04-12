@@ -648,7 +648,7 @@ export default function App() {
   // ==========================================
   // 👇 1. 加入站長身分判定
   // ==========================================
-  const ADMIN_UID = "ly67maavDYgo0vwuPT1jEVZrjVG3"; // <--- 🚨 請換成你的 UID
+  const ADMIN_UID = "kU1yvnKcN4NLldo8Rvtp4AOT7bv2"; // <--- 🚨 請換成你的 UID
   const isAdmin = user && user.uid === ADMIN_UID;
   
   // --- 狀態：彩種選擇 ---
