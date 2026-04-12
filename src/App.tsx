@@ -648,7 +648,7 @@ export default function App() {
   // ==========================================
   // 👇 1. 加入站長身分判定
   // ==========================================
-  const ADMIN_UID = "lN0NeerWopeZhToNTH4ynLMg9in1"; // <--- 🚨 請換成你的 UID
+  const ADMIN_UID = "ly67maavDYgo0vwuPT1jEVZrjVG3"; // <--- 🚨 請換成你的 UID
   const isAdmin = user && user.uid === ADMIN_UID;
   
   // --- 狀態：彩種選擇 ---
@@ -1519,7 +1519,7 @@ export default function App() {
 
     try {
       // 👇 4. 修改寫入路徑 (global_data)
-      const docRef = doc(db, 'artifacts', appId, 'global_data', `draws_${currentGame}`, Date.now().toString());
+      const docRef = doc(db, 'artifacts', appId, 'global_data', 'shared', `draws_${currentGame}`, Date.now().toString());
       await setDoc(docRef, { date: newDrawDate, period: newDrawPeriod, numbers: finalNumbers });
       setNewDrawDate(''); setNewDrawPeriod(''); setNewDrawNumbers(Array(currentConfig.drawCount).fill(''));
       setDataError('✅ 新增成功！(已安全同步至公共雲端)'); setTimeout(() => setDataError(''), 3000);
