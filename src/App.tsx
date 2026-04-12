@@ -4,22 +4,13 @@ import { initializeApp } from 'firebase/app';
 import { getAuth, signInWithCustomToken, signInAnonymously, onAuthStateChanged, signOut } from 'firebase/auth';
 import { getFirestore, collection, onSnapshot, doc, setDoc, deleteDoc, writeBatch, getDocs } from 'firebase/firestore';
 
-const firebaseConfig = {
-  apiKey: "AIzaSyDA_5BoHKadtjzkJAU1ArSi-N16DiFxxBQ",
-  authDomain: "ai-prediction-16f75.firebaseapp.com",
-  projectId: "ai-prediction-16f75",
-  storageBucket: "ai-prediction-16f75.firebasestorage.app",
-  messagingSenderId: "164533780528",
-  appId: "1:164533780528:web:f4cca94f6ce1ad27a76df5",
-  measurementId: "G-YQKYGSCX0G"
-};
-
+const firebaseConfig = typeof __firebase_config !== 'undefined' ? JSON.parse(__firebase_config) : {};
 const app = initializeApp(firebaseConfig);
 const auth = getAuth(app);
 const db = getFirestore(app);
 const appId = typeof __app_id !== 'undefined' ? __app_id : 'default-app-id';
 
-// ==================== 彩種設定檔 (支援動態切換模型參數與主客支分離) ====================
+// ==================== 彩種設定檔 ====================
 const GAME_CONFIG = {
   '539': { name: '今彩539', maxNum: 39, drawCount: 5, mainCount: 5, avgSum: 100, fetchUrl: 'https://lotto.auzonet.com/dailycash/list.html' },
   'ttl': { name: '加州天天樂', maxNum: 39, drawCount: 5, mainCount: 5, avgSum: 100, fetchUrl: 'https://lotto.auzonet.com/calottery/list.html' },
@@ -29,7 +20,6 @@ const GAME_CONFIG = {
 };
 
 // 【量化升級】限制超參數尋優空間 (Restrict Hyperparameter Search)
-// 取代原本 1~150 窮舉，改用特定觀測週期，降低隨機離群值 (Overfitting) 機率，提升執行效能
 const QUANT_SEARCH_PERIODS = [5, 10, 20, 30, 50, 80, 100, 150];
 
 // ==================== 演算法名稱定義 ====================
@@ -44,7 +34,7 @@ const ALGO_NAMES_AVOID = {
   parity: '⚖️ 單雙大小失衡 (極端反向)',
   gap: '⏳ 期距異常排除 (偏離平均間隔)',
   sum_dev: '📈 和值偏差排除 (均值校正回歸)',
-  volatility: '🌊 波動率動態切換 (趨勢/回歸)', // 【量化升級】取代玄學密碼，導入微結構波動率
+  volatility: '🌊 波動率動態切換 (趨勢/回歸)',
   consensus: '🌟 全模型共識 (Ensemble 集成)'
 };
 
@@ -59,7 +49,7 @@ const ALGO_NAMES_PLAY = {
   parity: '⚖️ 趨勢順向 (跟隨單雙大小)',
   gap: '⏳ 週期回歸 (到達平均期距)',
   sum_dev: '📈 和值均線 (均值校正回歸)',
-  volatility: '🌊 波動率動態切換 (趨勢/回歸)', // 【量化升級】取代玄學密碼，導入微結構波動率
+  volatility: '🌊 波動率動態切換 (趨勢/回歸)',
   consensus: '🌟 全模型共識 (Ensemble 集成)'
 };
 
@@ -99,16 +89,12 @@ const getPlayAlgoDescription = (algo) => {
   }
 };
 
-// ==================== 核心量化評分引擎 (懲罰機制 + 共識獎勵) ====================
-// 實作 [C] 模型集成獎勵 與 [D] 統計顯著性懲罰機制
 const calculateQuantScore = (res, criterion) => {
   let baseScore = 0;
   const tests = res.totalTests || 1;
-  // 樣本數越多，信賴權重越高 (Math.log10(N + 10) 避免小樣本暴衝)
   const confidenceWeight = Math.log10(tests + 10); 
 
   if (criterion === 'min_fail_streak') {
-    // 追求最低連敗：最大連敗越小分數越高。同時考量勝率。
     const accuracy = Number(res.overallAccuracy) / 100;
     baseScore = (accuracy / (res.maxFailStreak + 1)) * confidenceWeight;
   } else if (criterion === 'max_hits') {
@@ -123,15 +109,12 @@ const calculateQuantScore = (res, criterion) => {
     }
     baseScore = (successCount / tests) * confidenceWeight;
   } else {
-    // 預設 max_accuracy
     baseScore = (Number(res.overallAccuracy) / 100) * confidenceWeight;
   }
 
-  // 給予「綜合共識 (Consensus)」額外的抗過度擬合加權 (20% 獎勵)
   if (res.algorithmUsed === 'consensus') {
     baseScore *= 1.20; 
   }
-
   return baseScore;
 };
 
@@ -282,12 +265,10 @@ const getAvoidPredictionStats = (recentDraws, targetNumCount, targetAlgorithm, c
     const sumStats = [...stats].sort((a, b) => isOverHeated ? b.number - a.number : a.number - b.number);
     return fillWithCold(sumStats.slice(0, targetNumCount));
   } else if (targetAlgorithm === 'volatility') {
-    // 【微結構分析】計算近期和值的波動率 (標準差)
     const sums = recentDraws.map(d => d.numbers.slice(0, config.mainCount).reduce((acc, val) => acc + val, 0));
     const mean = sums.length > 0 ? sums.reduce((a, b) => a + b, 0) / sums.length : config.avgSum;
     const variance = sums.length > 0 ? sums.reduce((a, b) => a + Math.pow(b - mean, 2), 0) / sums.length : 0;
     const stdDev = Math.sqrt(variance);
-    // 大盤波動劇烈(>15) -> 均值回歸 (避開熱門) ; 大盤波動小(<15) -> 趨勢跟隨 (避開冷門)
     const isChaotic = stdDev > 15;
     const sortFn = isChaotic ? (a, b) => { if (a.count !== b.count) return b.count - a.count; return a.lastSeen - b.lastSeen; } : coldSort;
     return fillWithCold([...stats].sort(sortFn).slice(0, targetNumCount));
@@ -404,7 +385,6 @@ const getPlayPredictionStats = (recentDraws, targetNumCount, targetAlgorithm, co
     const sumStats = [...stats].sort((a, b) => isUnderHeated ? b.number - a.number : a.number - b.number);
     return fillWithHot(sumStats.slice(0, targetNumCount));
   } else if (targetAlgorithm === 'volatility') {
-    // 【微結構分析】計算波動率
     const sums = recentDraws.map(d => d.numbers.slice(0, config.mainCount).reduce((acc, val) => acc + val, 0));
     const mean = sums.length > 0 ? sums.reduce((a, b) => a + b, 0) / sums.length : config.avgSum;
     const variance = sums.length > 0 ? sums.reduce((a, b) => a + Math.pow(b - mean, 2), 0) / sums.length : 0;
@@ -656,6 +636,12 @@ export default function App() {
   const [isSubscribed, setIsSubscribed] = useState(false); 
   const [isDataLoading, setIsDataLoading] = useState(true);
   const [cloudStatus, setCloudStatus] = useState('connecting');
+
+  // ==========================================
+  // 👇 1. 加入站長身分判定
+  // ==========================================
+  const ADMIN_UID = "lN0NeerWopeZhToNTH4ynLMg9in1"; // <--- 🚨 請換成你的 UID
+  const isAdmin = user && user.uid === ADMIN_UID;
   
   // --- 狀態：彩種選擇 ---
   const [currentGame, setCurrentGame] = useState('539'); 
@@ -773,11 +759,13 @@ export default function App() {
 
     const unsubscribe = onAuthStateChanged(auth, (currentUser) => {
       setUser(currentUser);
-      if (!currentUser) {
+      if (currentUser) {
+        // 👇 這行幫你印出 UID，記得打開 F12 來看！
+        console.log("我的UID是：", currentUser.uid); 
+        setCloudStatus('connected');
+      } else {
         setCloudStatus('error'); 
         setIsDataLoading(false);
-      } else {
-        setCloudStatus('connected');
       }
     });
     return () => unsubscribe();
@@ -802,11 +790,14 @@ export default function App() {
     return () => unsubscribe();
   }, [user]);
 
-  // 歷史數據庫監聽
+  // ==========================================
+  // 👇 2. 修改：歷史數據庫監聽 (指向 global_data)
+  // ==========================================
   useEffect(() => {
     if (!user) return;
     setIsDataLoading(true);
-    const drawsRef = collection(db, 'artifacts', appId, 'users', user.uid, `draws_${currentGame}`);
+    // 所有人 (包含你與使用者) 都去讀取 global_data
+    const drawsRef = collection(db, 'artifacts', appId, 'global_data', `draws_${currentGame}`);
     const unsubscribe = onSnapshot(drawsRef, (snapshot) => {
       const data = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
       data.sort((a, b) => new Date(b.date) - new Date(a.date));
@@ -1456,7 +1447,8 @@ export default function App() {
       for (const gameKey of Object.keys(GAME_CONFIG)) {
         const config = GAME_CONFIG[gameKey];
 
-        const drawsRef = collection(db, 'artifacts', appId, 'users', user.uid, `draws_${gameKey}`);
+        // 👇 3. 修改全彩種統計的讀取路徑 (global_data)
+        const drawsRef = collection(db, 'artifacts', appId, 'global_data', `draws_${gameKey}`);
         const snapshot = await getDocs(drawsRef);
         const data = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
         data.sort((a, b) => new Date(b.date) - new Date(a.date));
@@ -1518,25 +1510,27 @@ export default function App() {
     const finalNumbers = [...mainNums, ...specialNums];
 
     try {
-      const docRef = doc(db, 'artifacts', appId, 'users', user.uid, `draws_${currentGame}`, Date.now().toString());
+      // 👇 4. 修改寫入路徑 (global_data)
+      const docRef = doc(db, 'artifacts', appId, 'global_data', `draws_${currentGame}`, Date.now().toString());
       await setDoc(docRef, { date: newDrawDate, period: newDrawPeriod, numbers: finalNumbers });
       setNewDrawDate(''); setNewDrawPeriod(''); setNewDrawNumbers(Array(currentConfig.drawCount).fill(''));
-      setDataError('✅ 新增成功！(已安全同步至雲端)'); setTimeout(() => setDataError(''), 3000);
-    } catch (err) { setDataError('❌ 儲存失敗，請檢查網路連線'); }
+      setDataError('✅ 新增成功！(已安全同步至公共雲端)'); setTimeout(() => setDataError(''), 3000);
+    } catch (err) { setDataError('❌ 儲存失敗，請檢查網路連線或權限'); }
   };
 
   const handleNewDrawNumberChange = (index, value) => { const newNumbers = [...newDrawNumbers]; newNumbers[index] = value; setNewDrawNumbers(newNumbers); };
   
   const handleDeleteDraw = async (id) => { 
-    if (!user) return; 
+    if (!user || !isAdmin) return; 
     try { 
-      await deleteDoc(doc(db, 'artifacts', appId, 'users', user.uid, `draws_${currentGame}`, id)); 
+      // 👇 5. 修改刪除路徑 (global_data)
+      await deleteDoc(doc(db, 'artifacts', appId, 'global_data', `draws_${currentGame}`, id)); 
       setConfirmDeleteId(null); 
-    } catch (err) {} 
+    } catch (err) { console.error("刪除失敗", err); } 
   };
 
   const handleDeleteAllData = async () => {
-    if (!user || historicalData.length === 0) return;
+    if (!user || !isAdmin || historicalData.length === 0) return;
     try {
       setIsDataLoading(true);
       const batches = [];
@@ -1544,7 +1538,8 @@ export default function App() {
       let count = 0;
 
       historicalData.forEach((draw, index) => {
-        const docRef = doc(db, 'artifacts', appId, 'users', user.uid, `draws_${currentGame}`, draw.id);
+        // 👇 6. 修改一鍵清空路徑 (global_data)
+        const docRef = doc(db, 'artifacts', appId, 'global_data', `draws_${currentGame}`, draw.id);
         currentBatch.delete(docRef);
         count++;
         if (count === 490 || index === historicalData.length - 1) {
@@ -1557,12 +1552,12 @@ export default function App() {
       await Promise.all(batches);
       setConfirmDeleteAll(false);
       setIsDataLoading(false);
-      setDataError('✅ 已成功清空所有歷史數據！');
+      setDataError('✅ 已成功清空公共歷史數據！');
       setTimeout(() => setDataError(''), 3000);
     } catch (err) {
       console.error("清空失敗:", err);
       setIsDataLoading(false);
-      setDataError('❌ 清空失敗，請稍後再試。');
+      setDataError('❌ 清空失敗，請檢查權限。');
       setTimeout(() => setDataError(''), 3000);
     }
   };
@@ -1631,7 +1626,7 @@ export default function App() {
       }
     }
 
-    if (addedCount > 0 && user) {
+    if (addedCount > 0 && user && isAdmin) {
       const existingDates = new Set(historicalData.map(d => d.date));
       const filteredNewDraws = newDraws.filter(d => !existingDates.has(d.date));
       const finalCount = filteredNewDraws.length;
@@ -1640,11 +1635,17 @@ export default function App() {
       
       try {
         const batch = writeBatch(db);
-        filteredNewDraws.forEach(draw => batch.set(doc(db, 'artifacts', appId, 'users', user.uid, `draws_${currentGame}`, draw.id), { date: draw.date, period: draw.period, numbers: draw.numbers }));
+        filteredNewDraws.forEach(draw => {
+          // 👇 7. 修改文字匯入的寫入路徑 (global_data)
+          batch.set(doc(db, 'artifacts', appId, 'global_data', `draws_${currentGame}`, draw.id), { 
+            date: draw.date, period: draw.period, numbers: draw.numbers 
+          });
+        });
         await batch.commit();
-        return { type: 'success', text: `🎉 成功解析並匯入 ${finalCount} 筆新資料！(已同步至雲端)` };
-      } catch (error) { return { type: 'error', text: '儲存至雲端失敗。' }; }
+        return { type: 'success', text: `🎉 成功解析並匯入 ${finalCount} 筆新資料！(已同步至公共雲端)` };
+      } catch (error) { return { type: 'error', text: '儲存至雲端失敗，請檢查管理員權限。' }; }
     } else if (!user) return { type: 'error', text: '系統尚未連線。' };
+    else if (!isAdmin) return { type: 'error', text: '❌ 只有管理員可以匯入資料。' };
     else return { type: 'error', text: '❌ 找不到符合格式的開獎數據。' };
   };
 
@@ -1674,7 +1675,7 @@ export default function App() {
       </div>
       <h2 className="text-3xl font-black text-gray-800 mb-4">解鎖 AI 量化專業版，掌握財富密碼</h2>
       <p className="text-gray-500 mb-8 font-medium leading-relaxed">
-        您目前使用的是免費版本，僅開放基礎「數據管理」與「號碼比對」。<br/>
+        您目前使用的是免費版本，僅開放基礎「數據查詢」與「號碼比對」。<br/>
         升級 <span className="text-yellow-600 font-bold">PRO 量化會員</span> 即可無限制使用「12 大 AI 預測模型」、「量化顯著性評分系統」與「機構級前向滾動回測」等強大功能！
       </p>
 
@@ -1720,6 +1721,7 @@ export default function App() {
                     {user.displayName ? user.displayName.charAt(0).toUpperCase() : 'U'}
                   </div>
                   <span className="text-sm font-medium text-slate-200 mr-3">{user.displayName || '會員'}</span>
+                  {isAdmin && <span className="text-xs bg-red-600 px-2 py-0.5 rounded text-white font-bold mr-2">站長</span>}
                   {isSubscribed ? (
                     <span className="bg-gradient-to-r from-yellow-400 to-yellow-600 text-yellow-900 text-xs font-black px-2 py-1 rounded flex items-center shadow-sm">
                       <Trophy className="w-3 h-3 mr-1"/> PRO
@@ -1742,23 +1744,23 @@ export default function App() {
             
             <div className="flex flex-wrap gap-1 bg-slate-800 p-1 rounded-lg">
               <button onClick={() => setActiveTab('global_stats')} className={`flex items-center px-4 py-2 rounded-md transition-colors font-bold text-sm ${activeTab === 'global_stats' ? 'bg-gradient-to-r from-yellow-400 to-orange-500 text-white shadow' : 'text-slate-300 hover:bg-slate-700'}`}>
-                {(!isSubscribed) && <Lock className="w-3 h-3 mr-1 opacity-50" />}
+                {(!isSubscribed && !isAdmin) && <Lock className="w-3 h-3 mr-1 opacity-50" />}
                 <Globe className="w-4 h-4 mr-1" /> 全彩種評測
               </button>
               <button onClick={() => setActiveTab('predict_extra')} className={`flex items-center px-4 py-2 rounded-md transition-colors font-bold text-sm ${activeTab === 'predict_extra' ? 'bg-gradient-to-r from-amber-500 to-orange-600 text-white shadow' : 'text-slate-300 hover:bg-slate-700'}`}>
-                {(!isSubscribed) && <Lock className="w-3 h-3 mr-1 opacity-50" />}
+                {(!isSubscribed && !isAdmin) && <Lock className="w-3 h-3 mr-1 opacity-50" />}
                 <Zap className="w-4 h-4 mr-1" /> 特碼孤支
               </button>
               <button onClick={() => setActiveTab('predict_special')} className={`flex items-center px-4 py-2 rounded-md transition-colors font-bold text-sm ${activeTab === 'predict_special' ? 'bg-gradient-to-r from-emerald-500 to-teal-600 text-white shadow' : 'text-slate-300 hover:bg-slate-700'}`}>
-                {(!isSubscribed) && <Lock className="w-3 h-3 mr-1 opacity-50" />}
+                {(!isSubscribed && !isAdmin) && <Lock className="w-3 h-3 mr-1 opacity-50" />}
                 <Compass className="w-4 h-4 mr-1" /> 特殊玩法
               </button>
               <button onClick={() => setActiveTab('predict_play')} className={`flex items-center px-4 py-2 rounded-md transition-colors font-bold text-sm ${activeTab === 'predict_play' ? 'bg-gradient-to-r from-red-500 to-rose-600 text-white shadow' : 'text-slate-300 hover:bg-slate-700'}`}>
-                {(!isSubscribed) && <Lock className="w-3 h-3 mr-1 opacity-50" />}
+                {(!isSubscribed && !isAdmin) && <Lock className="w-3 h-3 mr-1 opacity-50" />}
                 <Target className="w-4 h-4 mr-1" /> 出牌預測
               </button>
               <button onClick={() => setActiveTab('predict_avoid')} className={`flex items-center px-4 py-2 rounded-md transition-colors font-bold text-sm ${activeTab === 'predict_avoid' ? 'bg-indigo-600 text-white shadow' : 'text-slate-300 hover:bg-slate-700'}`}>
-                {(!isSubscribed) && <Lock className="w-3 h-3 mr-1 opacity-50" />}
+                {(!isSubscribed && !isAdmin) && <Lock className="w-3 h-3 mr-1 opacity-50" />}
                 <Lightbulb className="w-4 h-4 mr-1" /> 刪牌預測
               </button>
               <button onClick={() => setActiveTab('analysis')} className={`flex items-center px-4 py-2 rounded-md transition-colors font-medium text-sm ${activeTab === 'analysis' ? 'bg-white text-slate-900 shadow' : 'text-slate-300 hover:bg-slate-700'}`}>
@@ -1775,7 +1777,7 @@ export default function App() {
       <main className="max-w-5xl mx-auto px-4 py-8">
         
         {/* ==================== 權限阻擋 / 付費牆 ==================== */}
-        {(!isSubscribed && ['global_stats', 'predict_play', 'predict_avoid', 'predict_special', 'predict_extra'].includes(activeTab)) ? renderPaywall() : (
+        {(!isSubscribed && !isAdmin && ['global_stats', 'predict_play', 'predict_avoid', 'predict_special', 'predict_extra'].includes(activeTab)) ? renderPaywall() : (
           <>
             {/* ==================== 🏆 全彩種數據評測分頁 ==================== */}
             {activeTab === 'global_stats' && (
@@ -2784,63 +2786,69 @@ export default function App() {
             {activeTab === 'data' && (
               <div className="space-y-6">
 
-                <div className="bg-white rounded-xl shadow-sm border border-gray-100 p-6">
-                  <h2 className="text-lg font-semibold text-gray-700 mb-4 border-b pb-2 flex items-center"><Plus className="w-5 h-5 mr-2 text-indigo-500" /> 新增開獎結果 (自行填寫)</h2>
-                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-6">
-                    <div><label className="block text-sm text-gray-500 mb-1">開獎日期</label><input type="date" value={newDrawDate} onChange={(e) => setNewDrawDate(e.target.value)} className="w-full px-4 py-2 border rounded-lg focus:ring-2 focus:border-indigo-500 outline-none" /></div>
-                    <div><label className="block text-sm text-gray-500 mb-1">期數 (如: 115000075)</label><input type="text" value={newDrawPeriod} onChange={(e) => setNewDrawPeriod(e.target.value)} placeholder="請輸入期數" className="w-full px-4 py-2 border rounded-lg focus:ring-2 focus:border-indigo-500 outline-none" /></div>
-                  </div>
-                  <div className="mb-6">
-                    <label className="block text-sm text-gray-500 mb-2">開獎號碼 (共 {currentConfig.drawCount} 個，前 {currentConfig.mainCount} 個為主支)</label>
-                    <div className="flex flex-wrap gap-3">
-                      {newDrawNumbers.map((num, idx) => {
-                        const isSpecial = idx >= currentConfig.mainCount;
-                        return (
-                          <div key={`new-num-${idx}`} className="relative">
-                            <input 
-                              type="number" 
-                              min="1" 
-                              max={currentConfig.maxNum} 
-                              value={num} 
-                              onChange={(e) => handleNewDrawNumberChange(idx, e.target.value)} 
-                              className={`w-14 h-14 text-center text-xl font-bold rounded-full border-2 focus:outline-none transition-all ${isSpecial ? 'border-yellow-400 focus:border-yellow-600 bg-yellow-50' : 'border-gray-200 focus:border-indigo-500'}`} 
-                              placeholder={isSpecial ? '特' : '-'} 
-                            />
-                            {isSpecial && <span className="absolute -top-2 -right-1 bg-yellow-500 text-white text-[10px] font-bold px-1 rounded">特別號</span>}
-                          </div>
-                        );
-                      })}
+                {/* 👇 加入 isAdmin 判斷，包住手動新增區塊 */}
+                {isAdmin && (
+                  <div className="bg-white rounded-xl shadow-sm border border-gray-100 p-6">
+                    <h2 className="text-lg font-semibold text-gray-700 mb-4 border-b pb-2 flex items-center"><Plus className="w-5 h-5 mr-2 text-indigo-500" /> 新增開獎結果 (管理員專用)</h2>
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-6">
+                      <div><label className="block text-sm text-gray-500 mb-1">開獎日期</label><input type="date" value={newDrawDate} onChange={(e) => setNewDrawDate(e.target.value)} className="w-full px-4 py-2 border rounded-lg focus:ring-2 focus:border-indigo-500 outline-none" /></div>
+                      <div><label className="block text-sm text-gray-500 mb-1">期數 (如: 115000075)</label><input type="text" value={newDrawPeriod} onChange={(e) => setNewDrawPeriod(e.target.value)} placeholder="請輸入期數" className="w-full px-4 py-2 border rounded-lg focus:ring-2 focus:border-indigo-500 outline-none" /></div>
                     </div>
-                  </div>
-                  {dataError && <div className={`mb-4 p-3 rounded-lg text-sm ${dataError === '✅ 已成功清空所有歷史數據！' || dataError === '✅ 新增成功！(已安全同步至雲端)' ? 'bg-green-50 text-green-600' : 'bg-red-50 text-red-600'}`}>{dataError}</div>}
-                  <button onClick={handleAddNewDraw} className="w-full sm:w-auto px-6 py-2 bg-indigo-600 hover:bg-indigo-700 text-white font-medium rounded-lg transition-colors flex items-center justify-center">
-                    <Plus className="w-4 h-4 mr-2" /> 儲存這期開獎資料
-                  </button>
-                </div>
-
-                <div className="bg-white rounded-xl shadow-sm border border-gray-100 overflow-hidden">
-                  <div className="px-6 py-4 bg-gray-50 flex justify-between items-center cursor-pointer hover:bg-gray-100 transition-colors" onClick={() => setShowImport(!showImport)}>
-                    <h3 className="font-semibold text-gray-700 flex items-center"><FileText className="w-5 h-5 mr-2 text-indigo-500" /> 萬能文字批次匯入 / 備份歷史數據</h3>
-                    {showImport ? <ChevronUp className="w-5 h-5 text-gray-500" /> : <ChevronDown className="w-5 h-5 text-gray-500" />}
-                  </div>
-                  {showImport && (
-                    <div className="p-6 border-t border-gray-100">
-                      <div className="flex flex-col md:flex-row gap-6">
-                        <div className="flex-1">
-                          <label className="block text-sm font-medium text-gray-700 mb-2">貼上文字自動解析 (支援 Excel 或網頁直接全選複製)</label>
-                          <p className="text-xs text-gray-500 mb-2">無須精準排版，系統會自動無視中文與雜亂符號，精準尋找：<code className="bg-gray-100 px-1 py-0.5 rounded">日期 + {currentConfig.drawCount}顆球號</code></p>
-                          <textarea value={importText} onChange={(e) => setImportText(e.target.value)} className="w-full h-32 px-4 py-3 text-sm border rounded-lg focus:ring-2 focus:border-indigo-500 outline-none resize-none font-mono" placeholder="直接將網頁或 Excel 內容整片貼上來吧！" />
-                          {importMessage.text && <div className={`mt-2 p-3 rounded-lg text-sm font-bold ${importMessage.type === 'success' ? 'bg-green-50 text-green-700' : importMessage.type === 'info' ? 'bg-blue-50 text-blue-700' : 'bg-red-50 text-red-700'}`}>{importMessage.text}</div>}
-                          <button onClick={handleParseImport} className="mt-3 px-4 py-2 bg-gray-800 hover:bg-gray-900 text-white text-sm font-medium rounded-lg flex items-center"><Upload className="w-4 h-4 mr-2" /> 開始解析並匯入</button>
-                        </div>
-                        <div className="w-full md:w-64 flex flex-col border-t md:border-t-0 md:border-l border-gray-100 pt-4 md:pt-0 md:pl-6">
-                          <label className="block text-sm font-medium text-gray-700 mb-2">備份數據</label>
-                          <button onClick={handleExportData} className="w-full px-4 py-2 bg-indigo-50 text-indigo-700 border border-indigo-200 text-sm font-medium rounded-lg flex items-center justify-center"><Download className="w-4 h-4 mr-2" /> 下載備份檔 (.json)</button>
-                        </div>
+                    <div className="mb-6">
+                      <label className="block text-sm text-gray-500 mb-2">開獎號碼 (共 {currentConfig.drawCount} 個，前 {currentConfig.mainCount} 個為主支)</label>
+                      <div className="flex flex-wrap gap-3">
+                        {newDrawNumbers.map((num, idx) => {
+                          const isSpecial = idx >= currentConfig.mainCount;
+                          return (
+                            <div key={`new-num-${idx}`} className="relative">
+                              <input 
+                                type="number" 
+                                min="1" 
+                                max={currentConfig.maxNum} 
+                                value={num} 
+                                onChange={(e) => handleNewDrawNumberChange(idx, e.target.value)} 
+                                className={`w-14 h-14 text-center text-xl font-bold rounded-full border-2 focus:outline-none transition-all ${isSpecial ? 'border-yellow-400 focus:border-yellow-600 bg-yellow-50' : 'border-gray-200 focus:border-indigo-500'}`} 
+                                placeholder={isSpecial ? '特' : '-'} 
+                              />
+                              {isSpecial && <span className="absolute -top-2 -right-1 bg-yellow-500 text-white text-[10px] font-bold px-1 rounded">特別號</span>}
+                            </div>
+                          );
+                        })}
                       </div>
                     </div>
-                  )}
-                </div>
+                    {dataError && <div className={`mb-4 p-3 rounded-lg text-sm ${dataError === '✅ 已成功清空公共歷史數據！' || dataError === '✅ 新增成功！(已安全同步至公共雲端)' ? 'bg-green-50 text-green-600' : 'bg-red-50 text-red-600'}`}>{dataError}</div>}
+                    <button onClick={handleAddNewDraw} className="w-full sm:w-auto px-6 py-2 bg-indigo-600 hover:bg-indigo-700 text-white font-medium rounded-lg transition-colors flex items-center justify-center">
+                      <Plus className="w-4 h-4 mr-2" /> 儲存這期開獎資料
+                    </button>
+                  </div>
+                )}
+
+                {/* 👇 加入 isAdmin 判斷，包住匯入與備份區塊 */}
+                {isAdmin && (
+                  <div className="bg-white rounded-xl shadow-sm border border-gray-100 overflow-hidden">
+                    <div className="px-6 py-4 bg-gray-50 flex justify-between items-center cursor-pointer hover:bg-gray-100 transition-colors" onClick={() => setShowImport(!showImport)}>
+                      <h3 className="font-semibold text-gray-700 flex items-center"><FileText className="w-5 h-5 mr-2 text-indigo-500" /> 萬能文字批次匯入 / 備份歷史數據</h3>
+                      {showImport ? <ChevronUp className="w-5 h-5 text-gray-500" /> : <ChevronDown className="w-5 h-5 text-gray-500" />}
+                    </div>
+                    {showImport && (
+                      <div className="p-6 border-t border-gray-100">
+                        <div className="flex flex-col md:flex-row gap-6">
+                          <div className="flex-1">
+                            <label className="block text-sm font-medium text-gray-700 mb-2">貼上文字自動解析 (支援 Excel 或網頁直接全選複製)</label>
+                            <p className="text-xs text-gray-500 mb-2">無須精準排版，系統會自動無視中文與雜亂符號，精準尋找：<code className="bg-gray-100 px-1 py-0.5 rounded">日期 + {currentConfig.drawCount}顆球號</code></p>
+                            <textarea value={importText} onChange={(e) => setImportText(e.target.value)} className="w-full h-32 px-4 py-3 text-sm border rounded-lg focus:ring-2 focus:border-indigo-500 outline-none resize-none font-mono" placeholder="直接將網頁或 Excel 內容整片貼上來吧！" />
+                            {importMessage.text && <div className={`mt-2 p-3 rounded-lg text-sm font-bold ${importMessage.type === 'success' ? 'bg-green-50 text-green-700' : importMessage.type === 'info' ? 'bg-blue-50 text-blue-700' : 'bg-red-50 text-red-700'}`}>{importMessage.text}</div>}
+                            <button onClick={handleParseImport} className="mt-3 px-4 py-2 bg-gray-800 hover:bg-gray-900 text-white text-sm font-medium rounded-lg flex items-center"><Upload className="w-4 h-4 mr-2" /> 開始解析並匯入</button>
+                          </div>
+                          <div className="w-full md:w-64 flex flex-col border-t md:border-t-0 md:border-l border-gray-100 pt-4 md:pt-0 md:pl-6">
+                            <label className="block text-sm font-medium text-gray-700 mb-2">備份數據</label>
+                            <button onClick={handleExportData} className="w-full px-4 py-2 bg-indigo-50 text-indigo-700 border border-indigo-200 text-sm font-medium rounded-lg flex items-center justify-center"><Download className="w-4 h-4 mr-2" /> 下載備份檔 (.json)</button>
+                          </div>
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                )}
 
                 <div className="bg-white rounded-xl shadow-sm border border-gray-100 overflow-hidden">
                   <div className="px-6 py-4 border-b border-gray-100 bg-gray-50 flex flex-col sm:flex-row sm:justify-between sm:items-center gap-3">
@@ -2848,7 +2856,8 @@ export default function App() {
                       <h3 className="font-semibold text-gray-700 flex items-center"><Database className="w-5 h-5 mr-2 text-indigo-500" /> 已儲存的歷史資料庫</h3>
                       <span className="text-sm text-gray-500">共 {historicalData.length} 筆</span>
                     </div>
-                    {historicalData.length > 0 && (
+                    {/* 隱藏一鍵清空按鈕 */}
+                    {historicalData.length > 0 && isAdmin && (
                       confirmDeleteAll ? (
                         <div className="flex items-center space-x-2 bg-red-50 px-3 py-1.5 rounded-lg border border-red-100 self-end sm:self-auto">
                           <span className="text-sm text-red-600 font-bold mr-1">確定清空全部？(不可恢復)</span>
@@ -2883,13 +2892,16 @@ export default function App() {
                             </div>
                           </div>
                           <div className="self-end sm:self-auto mt-2 sm:mt-0">
-                            {confirmDeleteId === draw.id ? (
-                              <div className="flex items-center space-x-2 bg-red-50 px-3 py-2 rounded-lg border border-red-100">
-                                <span className="text-sm text-red-600 font-medium mr-1">確定刪除？</span>
-                                <button onClick={() => handleDeleteDraw(draw.id)} className="px-3 py-1 bg-red-500 text-white text-xs rounded">刪除</button>
-                                <button onClick={() => setConfirmDeleteId(null)} className="px-3 py-1 bg-white text-gray-600 text-xs rounded border">取消</button>
-                              </div>
-                            ) : (<button onClick={() => setConfirmDeleteId(draw.id)} className="p-2 text-red-400 hover:text-red-600 hover:bg-red-50 rounded-lg"><Trash2 className="w-5 h-5" /></button>)}
+                            {/* 👇 加上 isAdmin 判斷 */}
+                            {isAdmin && (
+                              confirmDeleteId === draw.id ? (
+                                <div className="flex items-center space-x-2 bg-red-50 px-3 py-2 rounded-lg border border-red-100">
+                                  <span className="text-sm text-red-600 font-medium mr-1">確定刪除？</span>
+                                  <button onClick={() => handleDeleteDraw(draw.id)} className="px-3 py-1 bg-red-500 text-white text-xs rounded">刪除</button>
+                                  <button onClick={() => setConfirmDeleteId(null)} className="px-3 py-1 bg-white text-gray-600 text-xs rounded border">取消</button>
+                                </div>
+                              ) : (<button onClick={() => setConfirmDeleteId(draw.id)} className="p-2 text-red-400 hover:text-red-600 hover:bg-red-50 rounded-lg"><Trash2 className="w-5 h-5" /></button>)
+                            )}
                           </div>
                         </div>
                       ))
