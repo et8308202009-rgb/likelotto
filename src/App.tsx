@@ -4,7 +4,15 @@ import { initializeApp } from 'firebase/app';
 import { getAuth, signInWithCustomToken, signInAnonymously, onAuthStateChanged, signOut } from 'firebase/auth';
 import { getFirestore, collection, onSnapshot, doc, setDoc, deleteDoc, writeBatch, getDocs } from 'firebase/firestore';
 
-const firebaseConfig = typeof __firebase_config !== 'undefined' ? JSON.parse(__firebase_config) : {};
+const firebaseConfig = {
+  apiKey: "AIzaSyDA_5BoHKadtjzkJAU1ArSi-N16DiFxxBQ",
+  authDomain: "ai-prediction-16f75.firebaseapp.com",
+  projectId: "ai-prediction-16f75",
+  storageBucket: "ai-prediction-16f75.firebasestorage.app",
+  messagingSenderId: "164533780528",
+  appId: "1:164533780528:web:f4cca94f6ce1ad27a76df5",
+  measurementId: "G-YQKYGSCX0G"
+};
 const app = initializeApp(firebaseConfig);
 const auth = getAuth(app);
 const db = getFirestore(app);
@@ -797,7 +805,7 @@ export default function App() {
     if (!user) return;
     setIsDataLoading(true);
     // 所有人 (包含你與使用者) 都去讀取 global_data
-    const drawsRef = collection(db, 'artifacts', appId, 'global_data', `draws_${currentGame}`);
+    const drawsRef = collection(db, 'artifacts', appId, 'global_data', 'shared', `draws_${currentGame}`);
     const unsubscribe = onSnapshot(drawsRef, (snapshot) => {
       const data = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
       data.sort((a, b) => new Date(b.date) - new Date(a.date));
