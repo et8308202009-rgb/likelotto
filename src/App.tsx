@@ -1652,7 +1652,9 @@ export default function App() {
         });
         await batch.commit();
         return { type: 'success', text: `🎉 成功解析並匯入 ${finalCount} 筆新資料！(已同步至公共雲端)` };
-      } catch (error) { return { type: 'error', text: '儲存至雲端失敗，請檢查管理員權限。' }; }
+      } catch (error: any) { 
+        return { type: 'error', text: '真實錯誤: ' + error.message }; 
+      }
     } else if (!user) return { type: 'error', text: '系統尚未連線。' };
     else if (false) {  } // 讓這個判定永遠不成立
         else return { type: 'error', text: '❌ 找不到符合格式的開獎數據。' };
