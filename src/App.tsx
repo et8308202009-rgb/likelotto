@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import { Calendar, Plus, Trash2, CheckCircle2, XCircle, BarChart3, Database, AlertCircle, Trophy, Upload, Download, FileText, ChevronDown, ChevronUp, ArrowDown, ArrowUp, Lightbulb, RotateCcw, Sparkles, Zap, Target, Globe, RefreshCw, User, LogOut, Lock, Compass } from 'lucide-react';
 import { initializeApp } from 'firebase/app';
-import { getAuth, signInWithCustomToken, signInAnonymously, onAuthStateChanged, signOut } from 'firebase/auth';
+import { getAuth, signInWithCustomToken, signInAnonymously, onAuthStateChanged, signOut, GoogleAuthProvider, signInWithPopup } from 'firebase/auth';
 import { getFirestore, collection, onSnapshot, doc, setDoc, deleteDoc, writeBatch, getDocs } from 'firebase/firestore';
 
 const firebaseConfig = {
@@ -828,7 +828,17 @@ const isAdmin = user && user.email === SUPER_USER_EMAIL;
     await signOut(auth);
     await signInAnonymously(auth);
   };
-
+  const handleLogin = async () => {
+    const provider = new GoogleAuthProvider();
+    try {
+      // 這一行會彈出 Google 登入視窗
+      const result = await signInWithPopup(auth, provider);
+      alert("登入成功！當前帳號：" + result.user.email);
+    } catch (error: any) {
+      console.error("登入失敗", error);
+      alert("登入失敗：" + error.message);
+    }
+  };
   const simulatePayment = async () => {
     if (!user) return;
     try {
@@ -1750,7 +1760,7 @@ const isAdmin = user && user.email === SUPER_USER_EMAIL;
                       <Trophy className="w-3 h-3 mr-1"/> PRO
                     </span>
                   ) : (
-                    <button onClick={simulatePayment} className="text-xs font-bold text-yellow-400 hover:text-yellow-300 border border-yellow-500/30 bg-yellow-500/10 px-2 py-1 rounded transition-colors">
+                    <button onClick={handleLogin} className="text-xs font-bold text-yellow-400 hover:text-yellow-300 border border-yellow-500/30 bg-yellow-500/10 px-2 py-1 rounded transition-colors">
                       升級 PRO
                     </button>
                   )}
@@ -1759,7 +1769,7 @@ const isAdmin = user && user.email === SUPER_USER_EMAIL;
                   </button>
                 </div>
               ) : (
-                <button onClick={simulatePayment} className="flex items-center text-sm font-bold bg-gradient-to-r from-yellow-400 to-orange-500 hover:from-yellow-500 text-white px-4 py-2 rounded-lg transition-colors shadow-md">
+                <button onClick={handleLogin} className="flex items-center text-sm font-bold bg-gradient-to-r from-yellow-400 to-orange-500 hover:from-yellow-500 text-white px-4 py-2 rounded-lg transition-colors shadow-md">
                   <Sparkles className="w-4 h-4 mr-2" /> 升級 PRO 體驗
                 </button>
               )}
