@@ -806,6 +806,7 @@ export default function App() {
     setIsDataLoading(true);
     // 所有人 (包含你與使用者) 都去讀取 global_data
     const drawsRef = collection(db, `draws_${currentGame}`);
+// 強迫更新 Vercel 2026-04-13
         const unsubscribe = onSnapshot(drawsRef, (snapshot) => {
       const data = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
       data.sort((a, b) => new Date(b.date) - new Date(a.date));
