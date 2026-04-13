@@ -641,6 +641,12 @@ const getSpecialPredictionStats = (mode, recentDraws, targetCount, targetAlgorit
 export default function App() {
   const [activeTab, setActiveTab] = useState('data'); 
   const [user, setUser] = useState(null);
+  // --- 1. 定義最高權限 Email ---
+const SUPER_USER_EMAIL = "et8308202009@gmail.com"; // <-- 這裡改成你真正的 Gmail
+
+// --- 2. 定義全局權限變數 (放在組件頂層，不要放進 useEffect) ---
+// 只要 user 存在，且它的 email 匹配，isAdmin 就會是 true
+const isAdmin = user && user.email === SUPER_USER_EMAIL;
   const [isSubscribed, setIsSubscribed] = useState(false); 
   const [isDataLoading, setIsDataLoading] = useState(true);
   const [cloudStatus, setCloudStatus] = useState('connecting');
@@ -1513,7 +1519,10 @@ export default function App() {
     if (parsedNumbers.some(isNaN) || parsedNumbers.some(n => n < 1 || n > currentConfig.maxNum)) return setDataError(`請輸入 ${currentConfig.drawCount} 個 1~${currentConfig.maxNum} 之間的有效數字`);
     if (new Set(parsedNumbers).size !== currentConfig.drawCount) return setDataError('開獎號碼不能重複且必須填滿');
     if (!user || cloudStatus !== 'connected') return setDataError('❌ 雲端未連線，無法儲存資料');
-    
+    if (!isAdmin) {
+      setDataError('❌ 權限錯誤：目前身分為 ' + (user?.email || '未登入') + '，非管理員 ' + SUPER_USER_EMAIL);
+      return;
+    }
     const mainNums = parsedNumbers.slice(0, currentConfig.mainCount).sort((a, b) => a - b);
     const specialNums = parsedNumbers.slice(currentConfig.mainCount);
     const finalNumbers = [...mainNums, ...specialNums];
@@ -1661,6 +1670,9 @@ export default function App() {
   };
 
   const handleParseImport = async () => {
+    if (!isAdmin) {
+      return { type: 'error', text: '❌ 權限錯誤：目前身分為 ' + (user?.email || '未登入') + '，非管理員 ' + SUPER_USER_EMAIL };
+    }
     if (!importText.trim()) return setImportMessage({ type: 'error', text: '請貼上要匯入的數據' });
     setImportMessage({ type: 'info', text: '⏳ 正在解析數據中...' });
     const resultMsg = await parseAndSaveData(importText);
