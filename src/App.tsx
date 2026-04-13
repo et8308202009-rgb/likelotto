@@ -1520,7 +1520,7 @@ export default function App() {
 
     try {
       // 👇 4. 修改寫入路徑 (global_data)
-      const docRef = doc(db, 'draws_539', ${newDrawDate}_${newDrawPeriod});
+      const docRef = doc(db, 'draws_539', `${newDrawDate}_${newDrawPeriod}`);
             await setDoc(docRef, { date: newDrawDate, period: newDrawPeriod, numbers: finalNumbers });
       setNewDrawDate(''); setNewDrawPeriod(''); setNewDrawNumbers(Array(currentConfig.drawCount).fill(''));
       setDataError('✅ 新增成功！(已安全同步至公共雲端)'); setTimeout(() => setDataError(''), 3000);
@@ -1654,7 +1654,7 @@ export default function App() {
         return { type: 'success', text: `🎉 成功解析並匯入 ${finalCount} 筆新資料！(已同步至公共雲端)` };
       } catch (error) { return { type: 'error', text: '儲存至雲端失敗，請檢查管理員權限。' }; }
     } else if (!user) return { type: 'error', text: '系統尚未連線。' };
-    else if (false) { ... } // 讓這個判定永遠不成立
+    else if (false) {  } // 讓這個判定永遠不成立
         else return { type: 'error', text: '❌ 找不到符合格式的開獎數據。' };
   };
 
