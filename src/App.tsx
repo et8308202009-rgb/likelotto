@@ -805,8 +805,8 @@ export default function App() {
     if (!user) return;
     setIsDataLoading(true);
     // 所有人 (包含你與使用者) 都去讀取 global_data
-    const drawsRef = collection(db, , `draws_${currentGame}`);
-    const unsubscribe = onSnapshot(drawsRef, (snapshot) => {
+    const drawsRef = collection(db, `draws_${currentGame}`);
+        const unsubscribe = onSnapshot(drawsRef, (snapshot) => {
       const data = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
       data.sort((a, b) => new Date(b.date) - new Date(a.date));
       setHistoricalData(data);
