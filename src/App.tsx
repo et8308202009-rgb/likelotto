@@ -1565,7 +1565,7 @@ const isAdmin = user && user.email === SUPER_USER_EMAIL;
 
       historicalData.forEach((draw, index) => {
         // 👇 6. 修改一鍵清空路徑 (global_data)
-        const docRef = doc(db, 'artifacts', appId, 'global_data', `draws_${currentGame}`, draw.id);
+        const docRef = doc(db, 'draws_539', `imported-${Date.now()}-${i}`);
         currentBatch.delete(docRef);
         count++;
         if (count === 490 || index === historicalData.length - 1) {
