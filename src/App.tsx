@@ -654,9 +654,7 @@ const isAdmin = user && user.email === SUPER_USER_EMAIL;
   // ==========================================
   // 👇 1. 加入站長身分判定
   // ==========================================
-  const ADMIN_UID = "kU1yvnKcN4NLldo8Rvtp4AOT7bv2"; // <--- 🚨 請換成你的 UID
-  const isAdmin = user && user.uid === ADMIN_UID;
-  
+  const ADMIN_UID = "kU1yvnKcN4NLldo8Rvtp4AOT7bv2"; // <--- 🚨 請換成你的 UID  
   // --- 狀態：彩種選擇 ---
   const [currentGame, setCurrentGame] = useState('539'); 
   const currentConfig = GAME_CONFIG[currentGame];
